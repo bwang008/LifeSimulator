@@ -19,7 +19,7 @@
 <body class="bg-gray-900 text-white overflow-hidden h-screen flex flex-col">
 
     <!-- Top Control Bar with Integrated Stats -->
-    <div class="relative z-10 p-4 md:p-6 flex flex-col md:flex-row justify-between items-start md:items-center space-y-4 md:space-y-0 control-panel-container bg-black bg-opacity-20">
+    <div class="flex-shrink-0 p-4 md:p-6 flex flex-col md:flex-row justify-between items-start md:items-center space-y-4 md:space-y-0 control-panel-container bg-black bg-opacity-20">
         <div class="flex-shrink-0">
             <h1 class="text-2xl md:text-3xl font-bold text-white tracking-wider">Ecosystem Simulator</h1>
             <p id="status" class="text-green-400 font-mono text-sm">Running</p>
@@ -44,29 +44,7 @@
     </div>
 
     <!-- Main Canvas for Simulation -->
-    <canvas id="ecosystemCanvas" class="absolute top-0 left-0 w-full h-full z-0"></canvas>
-        <div class="flex-shrink-0">
-            <h1 class="text-2xl md:text-3xl font-bold text-white tracking-wider">Ecosystem Simulator</h1>
-            <p id="status" class="text-green-400 font-mono text-sm">Running</p>
-        </div>
-        
-        <!-- Stats Panel - Integrated on the right -->
-        <div class="flex-shrink-0 p-3 control-panel-container bg-black bg-opacity-40 rounded-lg shadow-lg">
-            <h2 class="text-lg font-semibold mb-2 border-b border-gray-600 pb-1">Ecosystem Stats</h2>
-            <div id="statsContainer" class="space-y-2 text-xs">
-                <div id="plant-stats"></div>
-                <div id="herbivore-stats"></div>
-                <div id="carnivore-stats"></div>
-            </div>
-        </div>
-        
-        <div class="w-full md:w-auto grid grid-cols-2 sm:grid-cols-4 md:flex md:flex-row gap-2 md:gap-4 items-center">
-            <button id="startStopBtn" class="px-4 py-2 bg-green-500 hover:bg-green-600 rounded-lg shadow-md font-semibold transition-all duration-300 focus:outline-none focus:ring-2 focus:ring-green-400">Pause</button>
-            <button id="resetBtn" class="px-4 py-2 bg-blue-500 hover:bg-blue-600 rounded-lg shadow-md font-semibold transition-all duration-300 focus:outline-none focus:ring-2 focus:ring-blue-400">Reset</button>
-            <button id="zoomInBtn" class="px-4 py-2 bg-purple-500 hover:bg-purple-600 rounded-lg shadow-md font-semibold transition-all duration-300 focus:outline-none focus:ring-2 focus:ring-purple-400">Zoom In</button>
-            <button id="zoomOutBtn" class="px-4 py-2 bg-purple-500 hover:bg-purple-600 rounded-lg shadow-md font-semibold transition-all duration-300 focus:outline-none focus:ring-2 focus:ring-purple-400">Zoom Out</button>
-        </div>
-    </div>
+    <canvas id="ecosystemCanvas" class="flex-1 w-full"></canvas>
 
 <script>
 const canvas = document.getElementById('ecosystemCanvas');
@@ -93,7 +71,7 @@ const distance = (x1, y1, x2, y2) => Math.sqrt((x2 - x1)**2 + (y2 - y1)**2);
 // --- SIMULATION CONFIGURATION ---
 let config = {
     plant: {
-        count: 2000, // Increased from 80
+        count: 4000, // Increased from 80
         size: 3, // Reduced from 5 for smaller particles
         color: 'rgba(74, 222, 128, 0.8)',
         growthRate: 50.0 // Increased from 8.0 - much higher spawn rate to keep up with herbivores
@@ -289,6 +267,11 @@ class Carnivore extends Critter {
 
 // --- INITIALIZATION ---
 function init() {
+    // Get the actual canvas dimensions (excluding the top bar)
+    const canvasRect = canvas.getBoundingClientRect();
+    config.world.width = canvasRect.width;
+    config.world.height = canvasRect.height;
+    
     canvas.width = config.world.width;
     canvas.height = config.world.height;
 
@@ -482,8 +465,10 @@ zoomOutBtn.addEventListener('click', () => {
 });
 
 window.addEventListener('resize', () => {
-    config.world.width = window.innerWidth;
-    config.world.height = window.innerHeight;
+    // Get the actual canvas dimensions (excluding the top bar)
+    const canvasRect = canvas.getBoundingClientRect();
+    config.world.width = canvasRect.width;
+    config.world.height = canvasRect.height;
     canvas.width = config.world.width;
     canvas.height = config.world.height;
 });
