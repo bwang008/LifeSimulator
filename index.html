@@ -1,0 +1,452 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ecosystem Simulator</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+        .control-panel-container {
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+        }
+    </style>
+</head>
+<body class="bg-gray-900 text-white overflow-hidden h-screen flex flex-col">
+
+    <!-- Main Canvas for Simulation -->
+    <canvas id="ecosystemCanvas" class="absolute top-0 left-0 w-full h-full z-0"></canvas>
+
+    <!-- UI Controls and Information -->
+    <div class="relative z-10 p-4 md:p-6 flex flex-col md:flex-row justify-between items-start md:items-center space-y-4 md:space-y-0 control-panel-container bg-black bg-opacity-20">
+        <div class="flex-shrink-0">
+            <h1 class="text-2xl md:text-3xl font-bold text-white tracking-wider">Ecosystem Simulator</h1>
+            <p id="status" class="text-green-400 font-mono text-sm">Running</p>
+        </div>
+        
+        <div class="w-full md:w-auto grid grid-cols-2 sm:grid-cols-3 md:flex md:flex-row gap-2 md:gap-4 items-center">
+            <button id="startStopBtn" class="px-4 py-2 bg-green-500 hover:bg-green-600 rounded-lg shadow-md font-semibold transition-all duration-300 focus:outline-none focus:ring-2 focus:ring-green-400">Pause</button>
+            <button id="resetBtn" class="px-4 py-2 bg-blue-500 hover:bg-blue-600 rounded-lg shadow-md font-semibold transition-all duration-300 focus:outline-none focus:ring-2 focus:ring-blue-400">Reset</button>
+        </div>
+    </div>
+
+    <!-- Stats Panel -->
+    <div class="relative z-10 m-4 md:m-6 mt-0 p-4 control-panel-container bg-black bg-opacity-40 rounded-lg shadow-lg max-w-xs md:max-w-sm ml-auto">
+        <h2 class="text-xl font-semibold mb-3 border-b border-gray-600 pb-2">Ecosystem Stats</h2>
+        <div id="statsContainer" class="space-y-3 text-sm">
+            <div id="plant-stats"></div>
+            <div id="herbivore-stats"></div>
+            <div id="carnivore-stats"></div>
+        </div>
+    </div>
+
+<script>
+const canvas = document.getElementById('ecosystemCanvas');
+const ctx = canvas.getContext('2d');
+const startStopBtn = document.getElementById('startStopBtn');
+const resetBtn = document.getElementById('resetBtn');
+const statusEl = document.getElementById('status');
+const statsContainer = document.getElementById('statsContainer');
+
+let simulationRunning = true;
+let animationFrameId;
+
+// --- UTILITY FUNCTIONS ---
+const random = (min, max) => Math.random() * (max - min) + min;
+const distance = (x1, y1, x2, y2) => Math.sqrt((x2 - x1)**2 + (y2 - y1)**2);
+
+// --- SIMULATION CONFIGURATION ---
+let config = {
+    plant: {
+        count: 80,
+        size: 5,
+        color: 'rgba(74, 222, 128, 0.8)',
+        growthRate: 0.1 // New plants per second
+    },
+    herbivore: {
+        count: 25,
+        color: 'rgba(59, 130, 246, 0.9)',
+        size: { min: 6, max: 10 },
+        speed: { min: 0.5, max: 1.5 },
+        sense: { min: 50, max: 150 },
+        energy: 100,
+        reproduceEnergy: 150,
+        energyLossRate: 0.15
+    },
+    carnivore: {
+        count: 8,
+        color: 'rgba(239, 68, 68, 0.9)',
+        size: { min: 8, max: 12 },
+        speed: { min: 0.7, max: 1.8 },
+        sense: { min: 80, max: 200 },
+        energy: 120,
+        reproduceEnergy: 200,
+        energyLossRate: 0.2
+    },
+    world: {
+        width: window.innerWidth,
+        height: window.innerHeight,
+    }
+};
+
+let plants = [];
+let herbivores = [];
+let carnivores = [];
+
+// --- CLASSES ---
+
+class Plant {
+    constructor(x, y) {
+        this.x = x || random(0, config.world.width);
+        this.y = y || random(0, config.world.height);
+        this.size = config.plant.size;
+        this.energy = 20;
+    }
+
+    draw() {
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+        ctx.fillStyle = config.plant.color;
+        ctx.fill();
+    }
+}
+
+class Critter {
+    constructor(x, y, options) {
+        this.x = x || random(0, config.world.width);
+        this.y = y || random(0, config.world.height);
+        this.size = random(options.size.min, options.size.max);
+        this.speed = random(options.speed.min, options.speed.max);
+        this.senseRadius = random(options.sense.min, options.sense.max);
+        this.energy = options.energy;
+        this.reproduceEnergy = options.reproduceEnergy;
+        this.energyLossRate = options.energyLossRate;
+        this.color = options.color;
+        this.vx = random(-1, 1) * this.speed;
+        this.vy = random(-1, 1) * this.speed;
+        this.target = null;
+    }
+
+    draw() {
+        ctx.beginPath();
+        // Use squares for carnivores, circles for herbivores
+        if (this.constructor.name === 'Carnivore') {
+            ctx.rect(this.x - this.size / 2, this.y - this.size / 2, this.size, this.size);
+        } else {
+            ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+        }
+        ctx.fillStyle = this.color;
+        ctx.fill();
+
+        // Draw sense radius for debugging/visualization
+        // ctx.beginPath();
+        // ctx.arc(this.x, this.y, this.senseRadius, 0, Math.PI * 2);
+        // ctx.strokeStyle = 'rgba(255, 255, 255, 0.1)';
+        // ctx.stroke();
+    }
+
+    move() {
+        if (this.target) {
+            const angle = Math.atan2(this.target.y - this.y, this.target.x - this.x);
+            this.vx = Math.cos(angle) * this.speed;
+            this.vy = Math.sin(angle) * this.speed;
+        }
+
+        this.x += this.vx;
+        this.y += this.vy;
+
+        // Bounce off walls
+        if (this.x < this.size || this.x > config.world.width - this.size) {
+            this.vx *= -1;
+            this.x = Math.max(this.size, Math.min(this.x, config.world.width - this.size));
+        }
+        if (this.y < this.size || this.y > config.world.height - this.size) {
+            this.vy *= -1;
+            this.y = Math.max(this.size, Math.min(this.y, config.world.height - this.size));
+        }
+    }
+
+    update() {
+        this.energy -= this.energyLossRate;
+        this.findTarget();
+        this.move();
+    }
+
+    isDead() {
+        return this.energy <= 0;
+    }
+    
+    canReproduce() {
+        return this.energy >= this.reproduceEnergy;
+    }
+
+    reproduce(critterList, CritterClass, options) {
+        this.energy /= 2;
+        const newCritter = new CritterClass(this.x, this.y, options);
+        
+        // --- EVOLUTION: Simple mutation ---
+        newCritter.size *= random(0.9, 1.1);
+        newCritter.speed *= random(0.9, 1.1);
+        newCritter.senseRadius *= random(0.9, 1.1);
+        
+        critterList.push(newCritter);
+    }
+}
+
+class Herbivore extends Critter {
+    constructor(x, y) {
+        super(x, y, config.herbivore);
+    }
+
+    findTarget() {
+        // Flee from carnivores first
+        let closestPredator = null;
+        let minPredatorDist = this.senseRadius;
+
+        for (const predator of carnivores) {
+            const d = distance(this.x, this.y, predator.x, predator.y);
+            if (d < minPredatorDist) {
+                minPredatorDist = d;
+                closestPredator = predator;
+            }
+        }
+
+        if (closestPredator) {
+            const angle = Math.atan2(this.y - closestPredator.y, this.x - closestPredator.x);
+            this.target = { x: this.x + Math.cos(angle) * 100, y: this.y + Math.sin(angle) * 100 };
+            return;
+        }
+
+        // Find food if not fleeing
+        let closestFood = null;
+        let minFoodDist = this.senseRadius;
+
+        for (const plant of plants) {
+            const d = distance(this.x, this.y, plant.x, plant.y);
+            if (d < minFoodDist) {
+                minFoodDist = d;
+                closestFood = plant;
+            }
+        }
+        this.target = closestFood;
+    }
+}
+
+class Carnivore extends Critter {
+    constructor(x, y) {
+        super(x, y, config.carnivore);
+    }
+
+    findTarget() {
+        let closestPrey = null;
+        let minPreyDist = this.senseRadius;
+
+        for (const prey of herbivores) {
+            const d = distance(this.x, this.y, prey.x, prey.y);
+            if (d < minPreyDist) {
+                minPreyDist = d;
+                closestPrey = prey;
+            }
+        }
+        this.target = closestPrey;
+    }
+}
+
+// --- INITIALIZATION ---
+function init() {
+    canvas.width = config.world.width;
+    canvas.height = config.world.height;
+
+    plants = [];
+    herbivores = [];
+    carnivores = [];
+
+    for (let i = 0; i < config.plant.count; i++) {
+        plants.push(new Plant());
+    }
+    for (let i = 0; i < config.herbivore.count; i++) {
+        herbivores.push(new Herbivore());
+    }
+    for (let i = 0; i < config.carnivore.count; i++) {
+        carnivores.push(new Carnivore());
+    }
+}
+
+// --- UPDATE & RENDER LOOP ---
+function update() {
+    // Plant growth
+    if (random(0, 1) < config.plant.growthRate / 60) { // per frame
+        if (plants.length < 200) { // Max plants
+            plants.push(new Plant());
+        }
+    }
+
+    // Update critters
+    herbivores.forEach(h => h.update());
+    carnivores.forEach(c => c.update());
+
+    // Interactions
+    // Herbivores eat plants
+    for (let i = herbivores.length - 1; i >= 0; i--) {
+        const h = herbivores[i];
+        for (let j = plants.length - 1; j >= 0; j--) {
+            const p = plants[j];
+            if (distance(h.x, h.y, p.x, p.y) < h.size + p.size) {
+                h.energy += p.energy;
+                plants.splice(j, 1);
+                break; // Eat one plant per frame
+            }
+        }
+    }
+
+    // Carnivores eat herbivores
+    for (let i = carnivores.length - 1; i >= 0; i--) {
+        const c = carnivores[i];
+        for (let j = herbivores.length - 1; j >= 0; j--) {
+            const h = herbivores[j];
+            if (distance(c.x, c.y, h.x, h.y) < c.size + h.size) {
+                c.energy += h.energy * 0.5; // Energy transfer efficiency
+                herbivores.splice(j, 1);
+                break;
+            }
+        }
+    }
+    
+    // Reproduction
+    herbivores.forEach(h => {
+        if(h.canReproduce()) h.reproduce(herbivores, Herbivore, config.herbivore);
+    });
+    carnivores.forEach(c => {
+        if(c.canReproduce()) c.reproduce(carnivores, Carnivore, config.carnivore);
+    });
+
+    // Death
+    herbivores = herbivores.filter(h => !h.isDead());
+    carnivores = carnivores.filter(c => !c.isDead());
+    
+    updateStats();
+}
+
+function draw() {
+    ctx.clearRect(0, 0, config.world.width, config.world.height);
+    
+    // Draw a subtle grid
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.05)";
+    ctx.lineWidth = 1;
+    for (let i = 0; i < config.world.width; i += 50) {
+        ctx.beginPath();
+        ctx.moveTo(i, 0);
+        ctx.lineTo(i, config.world.height);
+        ctx.stroke();
+    }
+    for (let i = 0; i < config.world.height; i += 50) {
+        ctx.beginPath();
+        ctx.moveTo(0, i);
+        ctx.lineTo(config.world.width, i);
+        ctx.stroke();
+    }
+
+    plants.forEach(p => p.draw());
+    herbivores.forEach(h => h.draw());
+    carnivores.forEach(c => c.draw());
+}
+
+function gameLoop() {
+    if (simulationRunning) {
+        update();
+        draw();
+    }
+    animationFrameId = requestAnimationFrame(gameLoop);
+}
+
+// --- UI & STATS ---
+function getAverageStats(critterList) {
+    if (critterList.length === 0) return { speed: 0, size: 0, sense: 0 };
+    const total = critterList.reduce((acc, c) => {
+        acc.speed += c.speed;
+        acc.size += c.size;
+        acc.sense += c.senseRadius;
+        return acc;
+    }, { speed: 0, size: 0, sense: 0 });
+
+    return {
+        speed: (total.speed / critterList.length).toFixed(2),
+        size: (total.size / critterList.length).toFixed(2),
+        sense: (total.sense / critterList.length).toFixed(2)
+    };
+}
+
+function updateStats() {
+    const herbivoreAvgs = getAverageStats(herbivores);
+    const carnivoreAvgs = getAverageStats(carnivores);
+
+    document.getElementById('plant-stats').innerHTML = `
+        <div class="flex items-center space-x-2">
+            <div class="w-3 h-3 rounded-full" style="background-color: ${config.plant.color};"></div>
+            <span class="font-bold text-green-400">Plants:</span>
+            <span class="font-mono">${plants.length}</span>
+        </div>`;
+
+    document.getElementById('herbivore-stats').innerHTML = `
+        <div class="flex items-center space-x-2 mb-1">
+            <div class="w-3 h-3 rounded-full" style="background-color: ${config.herbivore.color};"></div>
+            <span class="font-bold text-blue-400">Herbivores:</span>
+            <span class="font-mono">${herbivores.length}</span>
+        </div>
+        <div class="pl-5 text-xs text-gray-300 font-mono">
+            Avg Speed: ${herbivoreAvgs.speed} | Avg Size: ${herbivoreAvgs.size} | Avg Sense: ${herbivoreAvgs.sense}
+        </div>`;
+
+    document.getElementById('carnivore-stats').innerHTML = `
+        <div class="flex items-center space-x-2 mb-1">
+            <div class="w-3 h-3" style="background-color: ${config.carnivore.color};"></div>
+            <span class="font-bold text-red-400">Carnivores:</span>
+            <span class="font-mono">${carnivores.length}</span>
+        </div>
+        <div class="pl-5 text-xs text-gray-300 font-mono">
+            Avg Speed: ${carnivoreAvgs.speed} | Avg Size: ${carnivoreAvgs.size} | Avg Sense: ${carnivoreAvgs.sense}
+        </div>`;
+}
+
+// --- EVENT LISTENERS ---
+startStopBtn.addEventListener('click', () => {
+    simulationRunning = !simulationRunning;
+    startStopBtn.textContent = simulationRunning ? 'Pause' : 'Resume';
+    startStopBtn.classList.toggle('bg-green-500', !simulationRunning);
+    startStopBtn.classList.toggle('hover:bg-green-600', !simulationRunning);
+    startStopBtn.classList.toggle('bg-yellow-500', simulationRunning);
+    startStopBtn.classList.toggle('hover:bg-yellow-600', simulationRunning);
+    statusEl.textContent = simulationRunning ? 'Running' : 'Paused';
+    statusEl.classList.toggle('text-green-400', simulationRunning);
+    statusEl.classList.toggle('text-yellow-400', !simulationRunning);
+});
+
+resetBtn.addEventListener('click', () => {
+    init();
+    if (!simulationRunning) {
+        simulationRunning = true;
+        startStopBtn.textContent = 'Pause';
+        statusEl.textContent = 'Running';
+        statusEl.classList.add('text-green-400');
+        statusEl.classList.remove('text-yellow-400');
+    }
+});
+
+window.addEventListener('resize', () => {
+    config.world.width = window.innerWidth;
+    config.world.height = window.innerHeight;
+    canvas.width = config.world.width;
+    canvas.height = config.world.height;
+});
+
+// --- START SIMULATION ---
+init();
+gameLoop();
+
+</script>
+</body>
+</html>
