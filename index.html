@@ -28,9 +28,11 @@
             <p id="status" class="text-green-400 font-mono text-sm">Running</p>
         </div>
         
-        <div class="w-full md:w-auto grid grid-cols-2 sm:grid-cols-3 md:flex md:flex-row gap-2 md:gap-4 items-center">
+        <div class="w-full md:w-auto grid grid-cols-2 sm:grid-cols-4 md:flex md:flex-row gap-2 md:gap-4 items-center">
             <button id="startStopBtn" class="px-4 py-2 bg-green-500 hover:bg-green-600 rounded-lg shadow-md font-semibold transition-all duration-300 focus:outline-none focus:ring-2 focus:ring-green-400">Pause</button>
             <button id="resetBtn" class="px-4 py-2 bg-blue-500 hover:bg-blue-600 rounded-lg shadow-md font-semibold transition-all duration-300 focus:outline-none focus:ring-2 focus:ring-blue-400">Reset</button>
+            <button id="zoomInBtn" class="px-4 py-2 bg-purple-500 hover:bg-purple-600 rounded-lg shadow-md font-semibold transition-all duration-300 focus:outline-none focus:ring-2 focus:ring-purple-400">Zoom In</button>
+            <button id="zoomOutBtn" class="px-4 py-2 bg-purple-500 hover:bg-purple-600 rounded-lg shadow-md font-semibold transition-all duration-300 focus:outline-none focus:ring-2 focus:ring-purple-400">Zoom Out</button>
         </div>
     </div>
 
@@ -49,11 +51,18 @@ const canvas = document.getElementById('ecosystemCanvas');
 const ctx = canvas.getContext('2d');
 const startStopBtn = document.getElementById('startStopBtn');
 const resetBtn = document.getElementById('resetBtn');
+const zoomInBtn = document.getElementById('zoomInBtn');
+const zoomOutBtn = document.getElementById('zoomOutBtn');
 const statusEl = document.getElementById('status');
 const statsContainer = document.getElementById('statsContainer');
 
 let simulationRunning = true;
 let animationFrameId;
+
+// --- ZOOM SYSTEM ---
+let zoomLevel = 1.0;
+let minZoom = 0.5;
+let maxZoom = 3.0;
 
 // --- UTILITY FUNCTIONS ---
 const random = (min, max) => Math.random() * (max - min) + min;
@@ -62,30 +71,30 @@ const distance = (x1, y1, x2, y2) => Math.sqrt((x2 - x1)**2 + (y2 - y1)**2);
 // --- SIMULATION CONFIGURATION ---
 let config = {
     plant: {
-        count: 80,
-        size: 5,
+        count: 200, // Increased from 80
+        size: 3, // Reduced from 5 for smaller particles
         color: 'rgba(74, 222, 128, 0.8)',
-        growthRate: 0.1 // New plants per second
+        growthRate: 2.0 // Increased from 0.8 - much higher spawn rate for constant food
     },
     herbivore: {
-        count: 25,
+        count: 30, // Reduced from 60 - approximately 15% of plants
         color: 'rgba(59, 130, 246, 0.9)',
-        size: { min: 6, max: 10 },
+        size: { min: 4, max: 7 }, // Reduced from 6-10 for smaller particles
         speed: { min: 0.5, max: 1.5 },
         sense: { min: 50, max: 150 },
-        energy: 100,
-        reproduceEnergy: 150,
-        energyLossRate: 0.15
+        energy: 120, // Increased from 100 for better sustainability
+        reproduceEnergy: 140, // Reduced from 150 for easier reproduction
+        energyLossRate: 0.12 // Reduced from 0.15 for slower energy loss
     },
     carnivore: {
-        count: 8,
+        count: 15, // Reduced from 20 - approximately half of herbivores
         color: 'rgba(239, 68, 68, 0.9)',
-        size: { min: 8, max: 12 },
+        size: { min: 5, max: 9 }, // Reduced from 8-12 for smaller particles
         speed: { min: 0.7, max: 1.8 },
         sense: { min: 80, max: 200 },
-        energy: 120,
-        reproduceEnergy: 200,
-        energyLossRate: 0.2
+        energy: 140, // Increased from 120 for better sustainability
+        reproduceEnergy: 180, // Reduced from 200 for easier reproduction
+        energyLossRate: 0.18 // Reduced from 0.2 for slower energy loss
     },
     world: {
         width: window.innerWidth,
@@ -104,12 +113,12 @@ class Plant {
         this.x = x || random(0, config.world.width);
         this.y = y || random(0, config.world.height);
         this.size = config.plant.size;
-        this.energy = 20;
+        this.energy = 30; // Increased from 20 to provide more energy per plant
     }
 
     draw() {
         ctx.beginPath();
-        ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+        ctx.arc(this.x, this.y, this.size * zoomLevel, 0, Math.PI * 2);
         ctx.fillStyle = config.plant.color;
         ctx.fill();
     }
@@ -135,16 +144,16 @@ class Critter {
         ctx.beginPath();
         // Use squares for carnivores, circles for herbivores
         if (this.constructor.name === 'Carnivore') {
-            ctx.rect(this.x - this.size / 2, this.y - this.size / 2, this.size, this.size);
+            ctx.rect(this.x - (this.size * zoomLevel) / 2, this.y - (this.size * zoomLevel) / 2, this.size * zoomLevel, this.size * zoomLevel);
         } else {
-            ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+            ctx.arc(this.x, this.y, this.size * zoomLevel, 0, Math.PI * 2);
         }
         ctx.fillStyle = this.color;
         ctx.fill();
 
         // Draw sense radius for debugging/visualization
         // ctx.beginPath();
-        // ctx.arc(this.x, this.y, this.senseRadius, 0, Math.PI * 2);
+        // ctx.arc(this.x, this.y, this.senseRadius * zoomLevel, 0, Math.PI * 2);
         // ctx.strokeStyle = 'rgba(255, 255, 255, 0.1)';
         // ctx.stroke();
     }
@@ -265,22 +274,28 @@ function init() {
     herbivores = [];
     carnivores = [];
 
-    for (let i = 0; i < config.plant.count; i++) {
+    // Generate random population counts based on ratios
+    const plantCount = config.plant.count;
+    const herbivoreCount = Math.floor(random(10, 20)); // 10-20 herbivores
+    const carnivoreCount = Math.floor(random(5, 10)); // 5-10 carnivores
+
+    for (let i = 0; i < plantCount; i++) {
         plants.push(new Plant());
     }
-    for (let i = 0; i < config.herbivore.count; i++) {
+    for (let i = 0; i < herbivoreCount; i++) {
         herbivores.push(new Herbivore());
     }
-    for (let i = 0; i < config.carnivore.count; i++) {
+    for (let i = 0; i < carnivoreCount; i++) {
         carnivores.push(new Carnivore());
     }
 }
 
 // --- UPDATE & RENDER LOOP ---
 function update() {
-    // Plant growth
-    if (random(0, 1) < config.plant.growthRate / 60) { // per frame
-        if (plants.length < 200) { // Max plants
+    // Plant growth - dynamic spawning based on current population
+    const plantSpawnRate = config.plant.growthRate * (1 + (500 - plants.length) / 500); // Spawn faster when fewer plants
+    if (random(0, 1) < plantSpawnRate / 60) { // per frame
+        if (plants.length < 500) { // Increased max plants from 200 to 500
             plants.push(new Plant());
         }
     }
@@ -436,11 +451,31 @@ resetBtn.addEventListener('click', () => {
     }
 });
 
+zoomInBtn.addEventListener('click', () => {
+    zoomLevel = Math.min(zoomLevel * 1.2, maxZoom);
+});
+
+zoomOutBtn.addEventListener('click', () => {
+    zoomLevel = Math.max(zoomLevel / 1.2, minZoom);
+});
+
 window.addEventListener('resize', () => {
     config.world.width = window.innerWidth;
     config.world.height = window.innerHeight;
     canvas.width = config.world.width;
     canvas.height = config.world.height;
+});
+
+// Mouse wheel zoom
+canvas.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    if (e.deltaY < 0) {
+        // Zoom in
+        zoomLevel = Math.min(zoomLevel * 1.1, maxZoom);
+    } else {
+        // Zoom out
+        zoomLevel = Math.max(zoomLevel / 1.1, minZoom);
+    }
 });
 
 // --- START SIMULATION ---
